@@ -3,6 +3,7 @@
 // this program hands that file over under the name the gate reads, after checking it against the
 // gate's own limits so a broken build fails here instead of at the gate.
 
+import { createHash } from 'node:crypto';
 import { copyFileSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -24,6 +25,13 @@ const width = header.readUInt32BE(16);
 const height = header.readUInt32BE(20);
 const size = statSync(source).size;
 
+// A whole PNG closes with an IEND chunk: four bytes of length, the type, then its CRC. A file cut
+// short while it was being written would pass the header test and fail here instead of at the gate.
+const all = readFileSync(source);
+if (all.subarray(size - 8, size - 4).toString('latin1') !== 'IEND') {
+  throw new Error('entry.png does not end with an IEND chunk, so it is not a whole PNG');
+}
+
 if (width > 1024 || height > 1024) {
   throw new Error(`entry.png is ${width} by ${height}, larger than the 1024 by 1024 the gate allows`);
 }
@@ -34,4 +42,7 @@ if (size > 1048576) {
 mkdirSync(outputDir, { recursive: true });
 copyFileSync(source, target);
 
-console.log(`wrote ${target}: ${width} by ${height}, ${size} bytes`);
+// Both runs must write the same bytes, so print the digest of what was written: two runs of the
+// grader show one line each and the lines have to match.
+const digest = createHash('sha256').update(readFileSync(target)).digest('hex');
+console.log(`wrote ${target}: ${width} by ${height}, ${size} bytes, sha256 ${digest}`);
